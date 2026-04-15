@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TESCOM AR Hologram</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; font-family: sans-serif; }
+  canvas { display: block; }
+
+  #info {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    color: rgba(60,140,255,0.6); font-size: 11px; letter-spacing: 3px; text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+<div id="info">TESCOM — AR HOLOGRAM DEMO</div>
+<canvas id="c"></canvas>
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const COMPANY = "TESCOM";
+const MODES = [
+  { primary: 0x2288ff, secondary: 0x0033cc, bg: 0x00040f },
+  { primary: 0x1155ff, secondary: 0x000088, bg: 0x000008 },
+  { primary: 0x66ccff, secondary: 0x2255cc, bg: 0x000d18 },
+  { primary: 0x44aaff, secondary: 0x0022ff, bg: 0x000510 },
+];
+let mode = 2, pulse = false, t = 0;
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+camera.position.set(0, 0, 5);
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+resize();
+window.addEventListener('resize', resize);
+
+const group = new THREE.Group();
+scene.add(group);
+
+function makeTextMesh(text, col) {
+  const cv = document.createElement('canvas');
+  cv.width = 1024; cv.height = 400;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, 1024, 400);
+  ctx.font = '900 220px Arial Black, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const hex = '#' + col.toString(16).padStart(6, '0');
+  ctx.shadowColor = hex;
+  ctx.shadowBlur = 60;
+  ctx.fillStyle = hex;
+  ctx.fillText(text, 512, 200);
+  // second pass for brightness
+  ctx.shadowBlur = 20;
+  ctx.fillStyle = '#ffffff';
+  ctx.globalAlpha = 0.3;
+  ctx.fillText(text, 512, 200);
+  const tex = new THREE.CanvasTexture(cv);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
+  return new THREE.Mesh(new THREE.PlaneGeometry(6.5, 2.5), mat);
+}
+
+function makeGrid(col) {
+  const geo = new THREE.PlaneGeometry(16, 16, 20, 20);
+  const mat = new THREE.MeshBasicMaterial({ color: col, wireframe: true, transparent: true, opacity: 0.12 });
+  const m = new THREE.Mesh(geo, mat);
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = -2.2;
+  return m;
+}
+
+function makeParticles(col) {
+  const cnt = 400;
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(cnt * 3);
+  for (let i = 0; i < cnt; i++) {
+    pos[i*3]   = (Math.random()-0.5)*14;
+    pos[i*3+1] = (Math.random()-0.5)*9;
+    pos[i*3+2] = (Math.random()-0.5)*9;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({ color: col, size: 0.045, transparent: true, opacity: 0.6 });
+  return new THREE.Points(geo, mat);
+}
+
+// 四角形フレーム（EdgesGeometry）
+function makeSquareFrame(size, col, opacity=0.6) {
+  const geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(size, size, 0.001));
+  const mat = new THREE.LineBasicMaterial({ color: col, transparent: true, opacity });
+  return new THREE.LineSegments(geo, mat);
+}
+
+// 四角形リング（立体的に傾けた正方形）
+function makeBoxRing(size, col, opacity=0.5) {
+  const geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(size, size, size * 0.02));
+  const mat = new THREE.LineBasicMaterial({ color: col, transparent: true, opacity });
+  return new THREE.LineSegments(geo, mat);
+}
+
+function makeScanline(col) {
+  const geo = new THREE.PlaneGeometry(8, 0.008);
+  const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
+  return new THREE.Mesh(geo, mat);
+}
+
+let textMesh, grid, particles, frame1, frame2, frame3, scanline;
+
+function buildScene() {
+  while (group.children.length) group.remove(group.children[0]);
+  const m = MODES[mode];
+  scene.background = new THREE.Color(m.bg);
+
+  textMesh = makeTextMesh(COMPANY, m.primary);
+  group.add(textMesh);
+
+  grid = makeGrid(m.secondary);
+  group.add(grid);
+
+  particles = makeParticles(m.primary);
+  group.add(particles);
+
+  // 大きい外枠（正面）
+  frame1 = makeSquareFrame(3.8, m.primary, 0.5);
+  group.add(frame1);
+
+  // 中サイズ（斜め回転）
+  frame2 = makeBoxRing(2.6, m.primary, 0.4);
+  frame2.rotation.x = Math.PI / 5;
+  group.add(frame2);
+
+  // 小サイズ（別軸回転）
+  frame3 = makeBoxRing(1.6, m.secondary, 0.35);
+  frame3.rotation.y = Math.PI / 4;
+  group.add(frame3);
+
+  scanline = makeScanline(m.primary);
+  scanline.position.y = 1.5;
+  group.add(scanline);
+}
+
+buildScene();
+
+function setMode(m) {
+  mode = m;
+  pulse = (m === 3);
+  buildScene();
+  document.querySelectorAll('.btn').forEach((b, i) => b.classList.toggle('active', i === m));
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  t += 0.016;
+
+  group.rotation.y = Math.sin(t * 0.25) * 0.35;
+  group.rotation.x = Math.sin(t * 0.18) * 0.07;
+
+  frame1.rotation.z = t * 0.4;
+  frame2.rotation.z = -t * 0.5;
+  frame2.rotation.x = t * 0.3;
+  frame3.rotation.y = t * 0.6;
+  frame3.rotation.x = -t * 0.4;
+
+  scanline.position.y = Math.sin(t * 1.1) * 1.9;
+
+  const pos = particles.geometry.attributes.position.array;
+  for (let i = 0; i < pos.length; i += 3) {
+    pos[i+1] += 0.003;
+    if (pos[i+1] > 4.5) pos[i+1] = -4.5;
+  }
+  particles.geometry.attributes.position.needsUpdate = true;
+
+  if (pulse) {
+    const op = 0.4 + 0.6 * Math.abs(Math.sin(t * 2.5));
+    textMesh.material.opacity = op;
+    frame1.material.opacity = op * 0.5;
+    frame2.material.opacity = op * 0.4;
+  } else {
+    textMesh.material.opacity = 1;
+  }
+
+  camera.position.y = Math.sin(t * 0.45) * 0.12;
+
+  // 背景色を黒→グレーで時間変化
+  const gray = 0.12 * (0.5 + 0.5 * Math.sin(t * 0.3));
+  scene.background.setRGB(gray * 0.6, gray * 0.7, gray);
+
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
